@@ -16,9 +16,7 @@
 
 @implementation SharePath
 
-/*
-    获取文件存储的主路径
-*/
+//获取文件存储的主路径
 + (NSString *)documentPath {
     static NSString *replaysPath;
     if (!replaysPath) {
@@ -38,18 +36,14 @@
     return replaysPath;
 }
 
-/*
-    获取当前将要录制视频文件的保存路径
-*/
+//获取当前将要录制视频文件的保存路径
 + (NSURL *)filePathUrlWithFileName:(NSString *)fileName{
     NSString *filePath = [fileName stringByAppendingPathExtension:@"mp4"];
     NSString *fullPath = [[self documentPath] stringByAppendingPathComponent:filePath];
     return [NSURL fileURLWithPath:fullPath];
 }
  
-/*
-    用于获取自定义路径下的所有文件
- */
+//用于获取自定义路径下的所有文件
 + (NSArray <NSURL *> *)fetechAllResource {
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
@@ -58,6 +52,6 @@
     NSError *error = nil;
     NSArray<NSURL *> *allResource  =  [fileManager contentsOfDirectoryAtURL:documentURL includingPropertiesForKeys:@[] options:(NSDirectoryEnumerationSkipsSubdirectoryDescendants) error:&error];
     return allResource;
-    
 }
+    
 @end

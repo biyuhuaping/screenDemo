@@ -20,6 +20,101 @@
 
 @implementation SampleHandler
 
+- (void)broadcastStartedWithSetupInfo:(NSDictionary<NSString *,NSObject *> *)setupInfo {
+    // User has requested to start the broadcast. Setup info from the UI extension can be supplied but optional.
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),(__bridge CFStringRef)ScreenDidStartNotif,NULL,nil,YES);
+    [self setupAssetWriter];//初始化AssetWriter
+    NSLog(@"开始录屏");
+}
+
+- (void)broadcastPaused {
+    // User has requested to pause the broadcast. Samples will stop being delivered.
+    NSLog(@"录屏暂停");
+}
+
+- (void)broadcastResumed {
+    // User has requested to resume the broadcast. Samples delivery will resume.
+    NSLog(@"录屏继续");
+}
+
+- (void)finishBroadcastWithError:(NSError *)error {
+    NSLog(@"录屏错误");
+    [self finishWriting];
+    [super finishBroadcastWithError:error];
+    //通知主程 录屏结束
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),(__bridge CFStringRef)ScreenDidFinishNotif,NULL,nil,YES);
+}
+
+- (void)broadcastFinished {
+    // User has requested to finish the broadcast.
+    NSLog(@"录屏结束");
+    [self finishWriting];
+    //通知主程 录屏结束
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),(__bridge CFStringRef)ScreenDidFinishNotif,NULL,nil,YES);
+}
+
+- (void)processSampleBuffer:(CMSampleBufferRef)sampleBuffer withType:(RPSampleBufferType)sampleBufferType {
+    switch (sampleBufferType) {
+        case RPSampleBufferTypeVideo:
+            // Handle video sample buffer
+            @autoreleasepool {
+                AVAssetWriterStatus status = self.assetWriter.status;
+                if ( status == AVAssetWriterStatusFailed || status == AVAssetWriterStatusCompleted || status == AVAssetWriterStatusCancelled) {
+                    NSAssert(false,@"屏幕录制AVAssetWriterStatusFailed error :%@", self.assetWriter.error);
+                    return;
+                }
+                if (status == AVAssetWriterStatusUnknown) {
+                    [self.assetWriter startWriting];
+                    CMTime time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
+                    [self.assetWriter startSessionAtSourceTime:time];
+                }
+                if (status == AVAssetWriterStatusWriting) {
+                    if (self.videoInput.isReadyForMoreMediaData) {
+                       BOOL success = [self.videoInput appendSampleBuffer:sampleBuffer];
+                        if (!success) {
+                            [self finishWriting];
+                        }
+                    }
+                }
+            }
+            break;
+        case RPSampleBufferTypeAudioApp:
+            if (self.audioAppInput.isReadyForMoreMediaData) {
+                BOOL success = [self.audioAppInput appendSampleBuffer:sampleBuffer];
+                if (!success) {
+                    [self finishWriting];
+                }
+            }
+            // Handle audio sample buffer for app audio
+            break;
+        case RPSampleBufferTypeAudioMic:
+            if (self.audioMicInput.isReadyForMoreMediaData) {
+                BOOL success = [self.audioMicInput appendSampleBuffer:sampleBuffer];
+                if (!success) {
+                    [self finishWriting];
+                }
+            }
+            // Handle audio sample buffer for mic audio
+            break;
+        default:
+            break;
+    }
+}
+
+- (void)finishWriting{
+    if (self.assetWriter.status == AVAssetWriterStatusWriting) {
+        [self.videoInput markAsFinished];
+        [self.audioAppInput markAsFinished];
+        [self.audioMicInput markAsFinished];
+        [self.assetWriter finishWritingWithCompletionHandler:^{
+            self.videoInput = nil;
+            self.audioAppInput = nil;
+            self.audioMicInput = nil;
+            self.assetWriter = nil;
+        }];
+    }
+}
+
 - (void)setupAssetWriter {
     if ([self.assetWriter canAddInput:self.videoInput]) {
         [self.assetWriter addInput:self.videoInput];
@@ -38,6 +133,7 @@
     }
 }
 
+#pragma mark - lazy
 - (AVAssetWriter *)assetWriter {
     if (!_assetWriter) {
         NSError *error = nil;
@@ -92,6 +188,7 @@
     }
     return _audioAppInput;
 }
+
 - (AVAssetWriterInput *)audioMicInput {
     if (!_audioMicInput) {
         NSDictionary *audioCompressionSettings = @{ AVEncoderBitRatePerChannelKey : @(28000),
@@ -103,103 +200,5 @@
         _audioMicInput.expectsMediaDataInRealTime = true;//实时录制
     }
     return _audioMicInput;
-}
-
-- (void)broadcastStartedWithSetupInfo:(NSDictionary<NSString *,NSObject *> *)setupInfo {
-    // User has requested to start the broadcast. Setup info from the UI extension can be supplied but optional.
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),(__bridge CFStringRef)ScreenDidStartNotif,NULL,nil,YES);
-    [self setupAssetWriter];//初始化AssetWriter
-    NSLog(@"开始录屏");
-}
-
-- (void)broadcastPaused {
-    // User has requested to pause the broadcast. Samples will stop being delivered.
-    NSLog(@"录屏暂停");
-}
-
-- (void)broadcastResumed {
-    // User has requested to resume the broadcast. Samples delivery will resume.
-    NSLog(@"录屏继续");
-}
-- (void)finishBroadcastWithError:(NSError *)error {
-    NSLog(@"录屏错误");
-    [self stopWriting];
-    [super finishBroadcastWithError:error];
-    //通知主程 录屏结束
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),(__bridge CFStringRef)ScreenDidFinishNotif,NULL,nil,YES);
-}
-- (void)broadcastFinished {
-    // User has requested to finish the broadcast.
-    NSLog(@"录屏结束");
-    [self stopWriting];
-    //通知主程 录屏结束
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),(__bridge CFStringRef)ScreenDidFinishNotif,NULL,nil,YES);
-}
-
-- (void)processSampleBuffer:(CMSampleBufferRef)sampleBuffer withType:(RPSampleBufferType)sampleBufferType {
-    
-    switch (sampleBufferType) {
-        case RPSampleBufferTypeVideo:
-            // Handle video sample buffer
-            @autoreleasepool {
-                AVAssetWriterStatus status = self.assetWriter.status;
-                if ( status == AVAssetWriterStatusFailed || status == AVAssetWriterStatusCompleted || status == AVAssetWriterStatusCancelled) {
-                    NSAssert(false,@"屏幕录制AVAssetWriterStatusFailed error :%@", self.assetWriter.error);
-                    return;
-                }
-                if (status == AVAssetWriterStatusUnknown) {
-                    [self.assetWriter startWriting];
-                    CMTime time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer);
-                    [self.assetWriter startSessionAtSourceTime:time];
-                }
-                if (status == AVAssetWriterStatusWriting) {
-                    if (self.videoInput.isReadyForMoreMediaData) {
-                       BOOL success = [self.videoInput appendSampleBuffer:sampleBuffer];
-                        if (!success) {
-                            [self stopWriting];
-                        }
-                    }
-                }
-            }
-            break;
-        case RPSampleBufferTypeAudioApp:
-            if (self.audioAppInput.isReadyForMoreMediaData) {
-                BOOL success = [self.audioAppInput appendSampleBuffer:sampleBuffer];
-                if (!success) {
-                    [self stopWriting];
-                }
-            }
-            // Handle audio sample buffer for app audio
-            break;
-        case RPSampleBufferTypeAudioMic:
-            if (self.audioMicInput.isReadyForMoreMediaData) {
-                BOOL success = [self.audioMicInput appendSampleBuffer:sampleBuffer];
-                if (!success) {
-                    [self stopWriting];
-                }
-            }
-            // Handle audio sample buffer for mic audio
-            break;
-        default:
-            break;
-    }
-}
-
-- (void)stopWriting{
-    if (self.assetWriter.status == AVAssetWriterStatusWriting) {
-        [self.videoInput markAsFinished];
-        [self.audioAppInput markAsFinished];
-        [self.audioMicInput markAsFinished];
-        if(@available(iOS 14.0, *)){
-            [self.assetWriter finishWritingWithCompletionHandler:^{
-                self.videoInput = nil;
-                self.audioAppInput = nil;
-                self.audioMicInput = nil;
-                self.assetWriter = nil;
-            }];
-        }else{//iOS14之前使用弃用方法mp4才能播放
-            [self.assetWriter finishWriting];
-        }
-    }
 }
 @end
